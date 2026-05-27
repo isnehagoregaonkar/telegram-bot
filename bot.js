@@ -1,6 +1,6 @@
 const { Telegraf } = require('telegraf')
 
-const bot = new Telegraf('8891417897:AAHD58cqP_7sRkjNJphBDYuoxU7xxO5h4Bs')
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN)
 
 // Link patterns — only group admins may post these
 const linkPatterns = [
