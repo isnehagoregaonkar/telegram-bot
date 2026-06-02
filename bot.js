@@ -4,13 +4,27 @@ const http = require('http')
 const { Telegraf } = require('telegraf')
 
 const token = process.env.TELEGRAM_BOT_TOKEN
+
 if (!token) {
-  throw new Error('TELEGRAM_BOT_TOKEN is missing. Add it to your .env file.')
+  throw new Error('TELEGRAM_BOT_TOKEN is missing.')
 }
 
 const bot = new Telegraf(token)
 
-// Link patterns — only group admins may post these
+/* ==========================
+   START COMMAND
+========================== */
+
+bot.start(async (ctx) => {
+  await ctx.reply(
+    '✅ Bot is running.\n\nAdd me as admin to a group and I will automatically delete links and promotional messages from non-admin users.'
+  )
+})
+
+/* ==========================
+   CONFIG
+========================== */
+
 const linkPatterns = [
   'http://',
   'https://',
@@ -19,7 +33,6 @@ const linkPatterns = [
   'www.'
 ]
 
-// Other promotional / spam patterns
 const spamPatterns = [
   'join my channel',
   'dm me',
@@ -35,16 +48,24 @@ const spamPatterns = [
   'subscribe now'
 ]
 
-function hasLink (text, entities = []) {
-  if (entities.some(e => e.type === 'url' || e.type === 'text_link')) {
+function hasLink(text = '', entities = []) {
+  if (
+    entities.some(
+      e =>
+        e.type === 'url' ||
+        e.type === 'text_link'
+    )
+  ) {
     return true
   }
 
   const lower = text.toLowerCase()
-  return linkPatterns.some(pattern => lower.includes(pattern))
+
+  return linkPatterns.some(pattern =>
+    lower.includes(pattern)
+  )
 }
 
-// Check admin
 async function isAdmin(ctx) {
   const admins = await ctx.getChatAdministrators()
 
@@ -53,65 +74,121 @@ async function isAdmin(ctx) {
   )
 }
 
-// Main moderation
+/* ==========================
+   MODERATION
+========================== */
+
 bot.on('message', async (ctx) => {
   try {
-    // Ignore service messages
+
+    // Ignore private chats
+    if (ctx.chat.type === 'private') {
+      return
+    }
+
+    // Only moderate groups/supergroups
+    if (
+      ctx.chat.type !== 'group' &&
+      ctx.chat.type !== 'supergroup'
+    ) {
+      return
+    }
+
     if (!ctx.from) return
 
-    // Ignore admins
     const adminCheck = await isAdmin(ctx)
 
+    // Allow admins
     if (adminCheck) return
 
-    const text = ctx.message.text || ctx.message.caption || ''
+    const text =
+      ctx.message.text ||
+      ctx.message.caption ||
+      ''
+
     const entities = [
       ...(ctx.message.entities || []),
       ...(ctx.message.caption_entities || [])
     ]
 
-    const containsLink = hasLink(text, entities)
-    const isSpam = spamPatterns.some(pattern =>
-      text.toLowerCase().includes(pattern)
+    const containsLink = hasLink(
+      text,
+      entities
+    )
+
+    const isSpam = spamPatterns.some(
+      pattern =>
+        text.toLowerCase().includes(pattern)
     )
 
     if (containsLink) {
       await ctx.deleteMessage()
-      console.log(`Deleted link from ${ctx.from.first_name}`)
+
+      console.log(
+        `Deleted link from ${ctx.from.first_name}`
+      )
+
       return
     }
 
     if (isSpam) {
       await ctx.deleteMessage()
-      console.log(`Deleted spam from ${ctx.from.first_name}`)
+
+      console.log(
+        `Deleted spam from ${ctx.from.first_name}`
+      )
     }
 
   } catch (error) {
-    console.log('Error:', error)
+    console.error(
+      'Moderation Error:',
+      error.description || error.message
+    )
   }
 })
 
-// Render requires web services to bind to PORT
+/* ==========================
+   HEALTH CHECK
+========================== */
+
 const port = process.env.PORT || 3000
-const server = http.createServer((_req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' })
-  res.end('Bot is running')
-})
+
+const server = http.createServer(
+  (_req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/plain'
+    })
+
+    res.end('Bot is running')
+  }
+)
 
 server.listen(port, () => {
-  console.log(`Health server listening on port ${port}`)
+  console.log(
+    `Health server listening on ${port}`
+  )
 })
 
-// Start bot
+/* ==========================
+   START BOT
+========================== */
+
 bot.launch()
 
-console.log('✅ Moderation bot is running...')
+console.log(
+  '✅ Moderation bot is running...'
+)
 
-// Graceful shutdown
-const shutdown = (signal) => {
-  bot.stop(signal)
+/* ==========================
+   SHUTDOWN
+========================== */
+
+process.once('SIGINT', () => {
+  bot.stop('SIGINT')
   server.close()
-}
+})
 
-process.once('SIGINT', () => shutdown('SIGINT'))
-process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGTERM', () => {
+  bot.stop('SIGTERM')
+  server.close()
+})
