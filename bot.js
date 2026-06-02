@@ -1,6 +1,14 @@
+require('dotenv').config()
+
+const http = require('http')
 const { Telegraf } = require('telegraf')
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN)
+const token = process.env.TELEGRAM_BOT_TOKEN
+if (!token) {
+  throw new Error('TELEGRAM_BOT_TOKEN is missing. Add it to your .env file.')
+}
+
+const bot = new Telegraf(token)
 
 // Link patterns — only group admins may post these
 const linkPatterns = [
@@ -83,11 +91,27 @@ bot.on('message', async (ctx) => {
   }
 })
 
+// Render requires web services to bind to PORT
+const port = process.env.PORT || 3000
+const server = http.createServer((_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' })
+  res.end('Bot is running')
+})
+
+server.listen(port, () => {
+  console.log(`Health server listening on port ${port}`)
+})
+
 // Start bot
 bot.launch()
 
 console.log('✅ Moderation bot is running...')
 
 // Graceful shutdown
-process.once('SIGINT', () => bot.stop('SIGINT'))
-process.once('SIGTERM', () => bot.stop('SIGTERM'))
+const shutdown = (signal) => {
+  bot.stop(signal)
+  server.close()
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'))
+process.once('SIGTERM', () => shutdown('SIGTERM'))
