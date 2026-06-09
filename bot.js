@@ -6,39 +6,47 @@ const { Telegraf } = require('telegraf')
 const token = process.env.TELEGRAM_BOT_TOKEN
 
 if (!token) {
-  throw new Error('TELEGRAM_BOT_TOKEN is missing.')
+  throw new Error('TELEGRAM_BOT_TOKEN is missing')
 }
 
 const bot = new Telegraf(token)
 
-/* ==========================
+/* =================================
    START COMMAND
-========================== */
+================================= */
 
 bot.start(async (ctx) => {
   await ctx.reply(
-    '✅ Bot is running.\n\nAdd me as admin to a group and I will automatically delete links and promotional messages from non-admin users.'
+    '✅ Bot is running.\n\nAdd me as admin to a group and give me Delete Messages permission.'
   )
 })
 
-/* ==========================
+/* =================================
    CONFIG
-========================== */
+================================= */
 
 const linkPatterns = [
   'http://',
   'https://',
+  'www.',
   't.me/',
   'telegram.me/',
-  'www.'
+  '.com',
+  '.net',
+  '.org',
+  '.io'
 ]
 
 const spamPatterns = [
   'join my channel',
+  'join our channel',
+  'join now',
   'dm me',
+  'message me',
   'earn money',
   'make money',
   'crypto signal',
+  'crypto signals',
   'casino',
   'betting',
   'forex',
@@ -48,15 +56,17 @@ const spamPatterns = [
   'subscribe now',
   'follow me',
   'follow us',
-  'follow us on',
-  'follow us on telegram',
-  'follow us on telegram channel',
-  'follow us on telegram group',
-  'follow us on telegram channel',
-  'HOT DEALS',
-  'HOT DEAL',
-  'HOT OFFERS',
+  'promotion',
+  'advertisement',
+  'hot deal',
+  'hot deals',
+  'hot offer',
+  'hot offers'
 ]
+
+/* =================================
+   HELPERS
+================================= */
 
 function hasLink(text = '', entities = []) {
   if (
@@ -72,31 +82,57 @@ function hasLink(text = '', entities = []) {
   const lower = text.toLowerCase()
 
   return linkPatterns.some(pattern =>
-    lower.includes(pattern)
+    lower.includes(pattern.toLowerCase())
   )
 }
 
 async function isAdmin(ctx) {
-  const admins = await ctx.getChatAdministrators()
+  try {
+    const admins = await ctx.getChatAdministrators()
 
-  return admins.some(
-    admin => admin.user.id === ctx.from.id
-  )
+    const adminIds = new Set(
+      admins.map(admin => admin.user.id)
+    )
+
+    return adminIds.has(ctx.from.id)
+  } catch (err) {
+    console.error('Admin check failed:', err.message)
+    return false
+  }
 }
 
-/* ==========================
+async function deleteMessage(ctx, reason) {
+  try {
+    await ctx.deleteMessage()
+
+    console.log(
+      `✅ Deleted ${reason} | User: ${
+        ctx.from?.username ||
+        ctx.from?.first_name ||
+        ctx.from?.id
+      }`
+    )
+  } catch (err) {
+    console.error(
+      '❌ Delete failed:',
+      err.description || err.message
+    )
+  }
+}
+
+/* =================================
    MODERATION
-========================== */
+================================= */
 
 bot.on('message', async (ctx) => {
   try {
 
-    // Ignore private chats
-    if (ctx.chat.type === 'private') {
-      return
-    }
+    if (!ctx.chat || !ctx.from) return
 
-    // Only moderate groups/supergroups
+    // Ignore private chats
+    if (ctx.chat.type === 'private') return
+
+    // Only groups
     if (
       ctx.chat.type !== 'group' &&
       ctx.chat.type !== 'supergroup'
@@ -104,64 +140,75 @@ bot.on('message', async (ctx) => {
       return
     }
 
-    if (!ctx.from) return
-
-    const adminCheck = await isAdmin(ctx)
-
-    // Allow admins
-    if (adminCheck) return
-
-    const text =
+    const text = (
       ctx.message.text ||
       ctx.message.caption ||
       ''
+    ).toLowerCase()
 
     const entities = [
       ...(ctx.message.entities || []),
       ...(ctx.message.caption_entities || [])
     ]
 
-    const containsLink = hasLink(
-      text,
-      entities
+    console.log(
+      `[MESSAGE] ${ctx.from.username || ctx.from.id}: ${text}`
     )
 
-    const isSpam = spamPatterns.some(
-      pattern =>
-        text.toLowerCase().includes(pattern)
-    )
+    // Skip admins
+    const admin = await isAdmin(ctx)
 
-    if (containsLink) {
-      await ctx.deleteMessage()
-
-      console.log(
-        `Deleted link from ${ctx.from.first_name}`
-      )
-
+    if (admin) {
+      console.log('Admin message ignored')
       return
     }
 
-    if (isSpam) {
-      await ctx.deleteMessage()
+    const containsLink = hasLink(text, entities)
 
-      console.log(
-        `Deleted spam from ${ctx.from.first_name}`
+    const containsSpam =
+      spamPatterns.some(pattern =>
+        text.includes(pattern)
       )
+
+    if (containsLink) {
+      await deleteMessage(ctx, 'LINK')
+      return
     }
 
-  } catch (error) {
+    if (containsSpam) {
+      await deleteMessage(ctx, 'SPAM')
+      return
+    }
+
+  } catch (err) {
     console.error(
       'Moderation Error:',
-      error.description || error.message
+      err.description || err.message
     )
   }
 })
 
-/* ==========================
-   HEALTH CHECK
-========================== */
+/* =================================
+   TEST COMMAND
+================================= */
 
-const port = process.env.PORT || 3000
+bot.command('testdelete', async (ctx) => {
+  try {
+    await ctx.deleteMessage()
+    console.log('Delete permission works')
+  } catch (err) {
+    console.error(
+      'Bot lacks delete permission:',
+      err.description || err.message
+    )
+  }
+})
+
+/* =================================
+   HEALTH CHECK
+================================= */
+
+const PORT = process.env.PORT || 3000
 
 const server = http.createServer(
   (_req, res) => {
@@ -173,25 +220,23 @@ const server = http.createServer(
   }
 )
 
-server.listen(port, () => {
+server.listen(PORT, () => {
   console.log(
-    `Health server listening on ${port}`
+    `🌐 Health server listening on ${PORT}`
   )
 })
 
-/* ==========================
+/* =================================
    START BOT
-========================== */
+================================= */
 
 bot.launch()
 
-console.log(
-  '✅ Moderation bot is running...'
-)
+console.log('🚀 Moderation bot started')
 
-/* ==========================
+/* =================================
    SHUTDOWN
-========================== */
+================================= */
 
 process.once('SIGINT', () => {
   bot.stop('SIGINT')
