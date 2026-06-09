@@ -45,7 +45,17 @@ const spamPatterns = [
   'free followers',
   'paid promotion',
   'click here',
-  'subscribe now'
+  'subscribe now',
+  'follow me',
+  'follow us',
+  'follow us on',
+  'follow us on telegram',
+  'follow us on telegram channel',
+  'follow us on telegram group',
+  'follow us on telegram channel',
+  'HOT DEALS',
+  'HOT DEAL',
+  'HOT OFFERS',
 ]
 
 function hasLink(text = '', entities = []) {
