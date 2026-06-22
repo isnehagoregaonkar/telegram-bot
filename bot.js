@@ -41,12 +41,16 @@ const spamPatterns = [
   'join my channel',
   'join our channel',
   'join now',
+  'join us',
   'dm me',
   'message me',
+  'inbox me',
   'earn money',
   'make money',
+  'passive income',
   'crypto signal',
   'crypto signals',
+  'trading signal',
   'casino',
   'betting',
   'forex',
@@ -61,14 +65,27 @@ const spamPatterns = [
   'hot deal',
   'hot deals',
   'hot offer',
-  'hot offers'
+  'hot offers',
+  'limited offer',
+  'limited time',
+  'whatsapp',
+  'contact us',
+  'investment opportunity',
+  'double your',
+  'guaranteed profit',
+  'work from home',
+  'airdrop',
+  'giveaway'
 ]
+
+const urlRegex =
+  /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|\b[a-z0-9][a-z0-9-]*\.(?:com|net|org|io|me|co|xyz|app|link|info|biz|online|store|shop|site|top|vip|pro|live|fun|click|bet|casino|in|uk|us|de|ru)\b)/i
 
 /* =================================
    HELPERS
 ================================= */
 
-function hasLink(text = '', entities = []) {
+function hasLink (text = '', entities = [], message = {}) {
   if (
     entities.some(
       e =>
@@ -81,9 +98,38 @@ function hasLink(text = '', entities = []) {
 
   const lower = text.toLowerCase()
 
-  return linkPatterns.some(pattern =>
-    lower.includes(pattern.toLowerCase())
-  )
+  if (linkPatterns.some(pattern => lower.includes(pattern))) {
+    return true
+  }
+
+  if (urlRegex.test(text)) {
+    return true
+  }
+
+  const keyboard = message.reply_markup?.inline_keyboard
+  if (keyboard?.some(row => row.some(btn => btn.url || btn.login_url))) {
+    return true
+  }
+
+  return false
+}
+
+function isForwardedFromChannel (message = {}) {
+  if (message.forward_from_chat?.type === 'channel') {
+    return true
+  }
+
+  return message.forward_origin?.type === 'channel'
+}
+
+let botUserId = null
+
+async function getBotUserId (telegram) {
+  if (!botUserId) {
+    botUserId = (await telegram.getMe()).id
+  }
+
+  return botUserId
 }
 
 async function isAdmin(ctx) {
@@ -124,62 +170,76 @@ async function deleteMessage(ctx, reason) {
    MODERATION
 ================================= */
 
-bot.on('message', async (ctx) => {
+async function moderateMessage (ctx) {
+  if (!ctx.chat || !ctx.from || !ctx.message) return
+
+  if (ctx.chat.type === 'private') return
+
+  if (
+    ctx.chat.type !== 'group' &&
+    ctx.chat.type !== 'supergroup'
+  ) {
+    return
+  }
+
+  const text = (
+    ctx.message.text ||
+    ctx.message.caption ||
+    ''
+  ).toLowerCase()
+
+  const entities = [
+    ...(ctx.message.entities || []),
+    ...(ctx.message.caption_entities || [])
+  ]
+
+  console.log(
+    `[MESSAGE] ${ctx.from.username || ctx.from.id}: ${text || '(no text)'}`
+  )
+
+  const ourBotId = await getBotUserId(ctx.telegram)
+
+  // Block all other bots
+  if (ctx.from.is_bot && ctx.from.id !== ourBotId) {
+    await deleteMessage(ctx, 'BOT')
+    return
+  }
+
+  // Block inline-bot messages
+  if (ctx.message.via_bot) {
+    await deleteMessage(ctx, 'VIA_BOT')
+    return
+  }
+
+  const admin = await isAdmin(ctx)
+
+  if (admin) {
+    console.log('Admin message ignored')
+    return
+  }
+
+  const containsLink = hasLink(text, entities, ctx.message)
+  const containsSpam = spamPatterns.some(pattern => text.includes(pattern))
+  const isChannelForward = isForwardedFromChannel(ctx.message)
+
+  if (containsLink) {
+    await deleteMessage(ctx, 'LINK')
+    return
+  }
+
+  if (containsSpam) {
+    await deleteMessage(ctx, 'SPAM')
+    return
+  }
+
+  if (isChannelForward) {
+    await deleteMessage(ctx, 'CHANNEL_FORWARD')
+  }
+}
+
+bot.on(['message', 'edited_message'], async (ctx) => {
   try {
-
-    if (!ctx.chat || !ctx.from) return
-
-    // Ignore private chats
-    if (ctx.chat.type === 'private') return
-
-    // Only groups
-    if (
-      ctx.chat.type !== 'group' &&
-      ctx.chat.type !== 'supergroup'
-    ) {
-      return
-    }
-
-    const text = (
-      ctx.message.text ||
-      ctx.message.caption ||
-      ''
-    ).toLowerCase()
-
-    const entities = [
-      ...(ctx.message.entities || []),
-      ...(ctx.message.caption_entities || [])
-    ]
-
-    console.log(
-      `[MESSAGE] ${ctx.from.username || ctx.from.id}: ${text}`
-    )
-
-    // Skip admins
-    const admin = await isAdmin(ctx)
-
-    if (admin) {
-      console.log('Admin message ignored')
-      return
-    }
-
-    const containsLink = hasLink(text, entities)
-
-    const containsSpam =
-      spamPatterns.some(pattern =>
-        text.includes(pattern)
-      )
-
-    if (containsLink) {
-      await deleteMessage(ctx, 'LINK')
-      return
-    }
-
-    if (containsSpam) {
-      await deleteMessage(ctx, 'SPAM')
-      return
-    }
-
+    await moderateMessage(ctx)
   } catch (err) {
     console.error(
       'Moderation Error:',
